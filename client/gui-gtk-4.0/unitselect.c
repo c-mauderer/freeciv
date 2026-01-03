@@ -121,9 +121,11 @@ struct unit_select_dialog {
   GtkWidget *notebook;
 
   struct {
+#ifdef OLD
     GtkTreeStore *store;
-    GtkWidget *page;
     GtkWidget *view;
+#endif
+    GtkWidget *page;
     GtkTreePath *path;
 
     GtkWidget *cmd[USDLG_CMD_LAST];
@@ -148,6 +150,7 @@ static GtkTreeStore *usdlg_tab_store_new(void);
 static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
                              struct usdata_hash *ushash,
                              enum unit_select_location_mode loc);
+#ifdef OLD
 static void usdlg_tab_append_utype(GtkTreeStore *store,
                                    enum unit_select_location_mode loc,
                                    const struct unit_type *putype,
@@ -158,6 +161,7 @@ static void usdlg_tab_append_activity(GtkTreeStore *store,
                                       enum unit_activity act,
                                       int count, GtkTreeIter *it,
                                       GtkTreeIter *parent);
+#endif
 static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
                                    enum unit_select_location_mode loc,
                                    enum unit_activity act,
@@ -350,10 +354,12 @@ static void usdlg_refresh(struct unit_select_dialog *pdialog)
       gtk_widget_set_visible(pdialog->tabs[loc].page, TRUE);
 
       if (pdialog->tabs[loc].path) {
+#ifdef OLD
         gtk_tree_view_expand_row(GTK_TREE_VIEW(pdialog->tabs[loc].view),
                                  pdialog->tabs[loc].path,FALSE);
         gtk_tree_view_set_cursor(GTK_TREE_VIEW(pdialog->tabs[loc].view),
                                  pdialog->tabs[loc].path, NULL, FALSE);
+#endif
         gtk_tree_path_free(pdialog->tabs[loc].path);
         pdialog->tabs[loc].path = NULL;
       }
@@ -381,8 +387,11 @@ static void usdlg_tab_select(struct unit_select_dialog *pdialog,
                              const char *title,
                              enum unit_select_location_mode loc)
 {
-  GtkWidget *page, *label, *hgrid, *vgrid, *view, *sw;
+  GtkWidget *page, *label, *hgrid, *vgrid, *sw;
+#ifdef OLD
+  GtkWidget *view;
   GtkTreeStore *store;
+#endif
   static bool titles_done;
   int i;
   int page_row = 0;
@@ -404,6 +413,7 @@ static void usdlg_tab_select(struct unit_select_dialog *pdialog,
   hgrid = gtk_grid_new();
   gtk_grid_attach(GTK_GRID(page), hgrid, 0, page_row++, 1, 1);
 
+#ifdef OLD
   store = usdlg_tab_store_new();
   pdialog->tabs[loc].store = store;
 
@@ -417,10 +427,12 @@ static void usdlg_tab_select(struct unit_select_dialog *pdialog,
                    GINT_TO_POINTER(loc));
   g_signal_connect(view, "cursor-changed",
                    G_CALLBACK(usdlg_cmd_cursor_changed), GINT_TO_POINTER(loc));
+#endif
 
   /* Translate titles. */
   intl_slist(ARRAY_SIZE(usdlg_col_titles), usdlg_col_titles, &titles_done);
 
+#ifdef OLD
   for (i = 0; i < USDLG_COLUMNS_SHOW; i++) {
     GtkTreeViewColumn *column = NULL;
     GtkCellRenderer *renderer = NULL;
@@ -453,13 +465,16 @@ static void usdlg_tab_select(struct unit_select_dialog *pdialog,
     fc_assert_ret(column != NULL);
     gtk_tree_view_append_column(GTK_TREE_VIEW(view), column);
   }
+#endif
 
   sw = gtk_scrolled_window_new();
   gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(sw), 300);
   gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(sw), TRUE);
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw),
                                  GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+#ifdef OLD
   gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), view);
+#endif
   gtk_grid_attach(GTK_GRID(hgrid), sw, grid_col++, 0, 1, 1);
 
   vgrid = gtk_grid_new();
@@ -538,6 +553,7 @@ static void usdlg_tab_select(struct unit_select_dialog *pdialog,
     GTK_WIDGET(pdialog->tabs[loc].cmd[USDLG_CMD_FOCUS]), FALSE);
 }
 
+#ifdef OLD
 /*************************************************************************//**
   Create a player dialog store.
 *****************************************************************************/
@@ -565,6 +581,7 @@ static GtkTreeStore *usdlg_tab_store_new(void)
 
   return store;
 }
+#endif
 
 /*************************************************************************//**
   Update on tab of the dialog.
@@ -574,15 +591,19 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
                              enum unit_select_location_mode loc)
 {
   bool show = FALSE;
+#ifdef OLD
   GtkTreeStore *store;
+#endif
 
   fc_assert_ret_val(ushash, FALSE);
   fc_assert_ret_val(pdialog != NULL, FALSE);
 
+#ifdef OLD
   store = pdialog->tabs[loc].store;
 
   /* clear current store. */
   gtk_tree_store_clear(GTK_TREE_STORE(store));
+#endif
 
   /* Iterate over all unit types. */
   if (loc == SELLOC_UNITS) {
@@ -635,15 +656,19 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
 
         /* Level 1: Display unit type. */
         if (first) {
+#ifdef OLD
           usdlg_tab_append_utype(GTK_TREE_STORE(store), loc, data->utype,
                                  &it_utype);
+#endif
           first = FALSE;
         }
 
         /* Level 2: Display unit activities. */
+#ifdef OLD
         usdlg_tab_append_activity(GTK_TREE_STORE(store), loc, data->utype,
                                   act, unit_list_size(data->units[loc][act]),
                                   &it_act, &it_utype);
+#endif
 
         /* Level 3: Display all units with this activity
          *          (and transported units in further level(s)). */
@@ -657,6 +682,7 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
         count += unit_list_size(data->units[loc][act]);
 
         /* Update sum of units with this type. */
+#ifdef OLD
         gtk_tree_store_set(GTK_TREE_STORE(store), &it_utype, 2, count, -1);
 
         /* Expand to the activities. */
@@ -666,6 +692,7 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
         gtk_tree_view_expand_row(GTK_TREE_VIEW(pdialog->tabs[loc].view), path,
                                  FALSE);
         gtk_tree_path_free(path);
+#endif
 
         /* Show this tab. */
         show = TRUE;
@@ -676,6 +703,7 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
   return show;
 }
 
+#ifdef OLD
 /*************************************************************************//**
   Append the data for one unit type.
 *****************************************************************************/
@@ -760,6 +788,7 @@ static void usdlg_tab_append_activity(GtkTreeStore *store,
                      9, PANGO_WEIGHT_NORMAL,            /* Weight */
                      -1);
 }
+#endif
 
 /*************************************************************************//**
   Get an unit selection list item suitable image of the specified unit.
@@ -841,16 +870,20 @@ static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
   enum usdlg_row_types row = ROW_UNIT;
   int style = PANGO_STYLE_NORMAL;
   int weight = PANGO_WEIGHT_NORMAL;
+#ifdef OLD
   GtkTreeStore *store;
+#endif
 
   fc_assert_ret(pdialog != NULL);
   fc_assert_ret(punit != NULL);
 
+#ifdef OLD
   store = pdialog->tabs[loc].store;
 
 
   /* Add this item. */
   gtk_tree_store_append(GTK_TREE_STORE(store), it, parent);
+#endif
 
   /* Unit gfx */
   pix = usdlg_get_unit_image(punit);
@@ -863,6 +896,7 @@ static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
     row = ROW_UNIT_TRANSPORTED;
   }
 
+#ifdef OLD
   /* Add it to the tree. */
   gtk_tree_store_set(GTK_TREE_STORE(store), it,
                      0, pix,                            /* Unit pixmap */
@@ -877,6 +911,7 @@ static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
                      9, weight,                         /* Weight */
                      -1);
   g_object_unref(pix);
+#endif
 
   if (get_transporter_occupancy(punit) > 0) {
     unit_list_iterate(unit_transport_cargo(punit), pcargo) {
@@ -894,8 +929,10 @@ static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
                      /* Don't leak memory. */
                      gtk_tree_path_free(pdialog->tabs[loc].path));
 
+#ifdef OLD
     pdialog->tabs[loc].path
       = gtk_tree_model_get_path(GTK_TREE_MODEL(store), it);
+#endif
   }
 }
 
@@ -939,7 +976,9 @@ static void usdlg_cmd_exec(GObject *object, gpointer mode_data,
 {
   enum unit_select_location_mode loc_mode
     = (enum unit_select_location_mode) GPOINTER_TO_INT(mode_data);
+#ifdef OLD
   GtkTreeView *view;
+#endif
   GtkTreeSelection *selection;
   GtkTreeModel *model;
   GtkTreeIter it;
@@ -953,6 +992,7 @@ static void usdlg_cmd_exec(GObject *object, gpointer mode_data,
     return;
   }
 
+#ifdef OLD
   view = GTK_TREE_VIEW(pdialog->tabs[loc_mode].view);
   selection = gtk_tree_view_get_selection(view);
 
@@ -1035,6 +1075,7 @@ static void usdlg_cmd_exec(GObject *object, gpointer mode_data,
     }
     break;
   }
+#endif
 
   /* Update focus. */
   unit_focus_update();
@@ -1088,6 +1129,7 @@ static void usdlg_cmd_center(GObject *object, gpointer data)
 {
   enum unit_select_location_mode loc
     = (enum unit_select_location_mode) GPOINTER_TO_INT(data);
+#ifdef OLD
   GtkTreeView *view;
   GtkTreeSelection *selection;
   GtkTreeModel *model;
@@ -1118,6 +1160,7 @@ static void usdlg_cmd_center(GObject *object, gpointer data)
       center_tile_mapcanvas(unit_tile(punit));
     }
   }
+#endif
 }
 
 /*************************************************************************//**
@@ -1132,9 +1175,12 @@ static void usdlg_cmd_focus(GObject *object, gpointer data)
   fc_assert_ret(pdialog != NULL);
   fc_assert_ret(unit_select_location_mode_is_valid(loc));
 
+#ifdef OLD
   usdlg_cmd_focus_real(GTK_TREE_VIEW(pdialog->tabs[loc].view));
+#endif
 }
 
+#ifdef OLD
 /*************************************************************************//**
   Callback if a row is activated.
 *****************************************************************************/
@@ -1296,3 +1342,4 @@ static void usdlg_cmd_cursor_changed(GtkTreeView *view, gpointer data)
                              cmd_status[cmd_id]);
   }
 }
+#endif
