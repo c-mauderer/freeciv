@@ -104,6 +104,55 @@ static const char *usdlg_col_titles[USDLG_COLUMNS_ALL] = {
   "[Width]"
 };
 
+typedef struct{
+  GObject parent;
+  GdkPixbuf *unit;
+  char *description;
+  int count;
+  int type;
+  int id;
+  int location;
+  int activity;
+  int row_type;
+  int style;
+  int weight;
+} usdlg_item_t;
+typedef struct {
+  GObjectClass parent_class;
+} usdlg_item_tClass;
+
+G_DEFINE_TYPE(usdlg_item_t, usdlg_item, G_TYPE_OBJECT)
+
+static void usdlg_item_finalize(GObject *o)
+{
+  usdlg_item_t *self = (usdlg_item_t *)o;
+  g_clear_object(&self->unit);
+  g_clear_pointer(&self->description, g_free);
+  G_OBJECT_CLASS(usdlg_item_parent_class)->finalize(o);
+}
+static void usdlg_item_class_init(usdlg_item_tClass *k) { G_OBJECT_CLASS(k)->finalize = usdlg_item_finalize; }
+static void usdlg_item_init(usdlg_item_t *i) {}
+
+static usdlg_item_t *usdlg_item_new(GdkPixbuf *unit, const char *description,
+                                    int count, int type, int id, int location,
+                                    int activity, int row_type, int style,
+                                    int weight) {
+  usdlg_item_t *self = g_object_new(usdlg_item_get_type(), NULL);
+
+  self->unit = unit;
+  self->description = g_strdup(description);
+  self->count = count;
+  self->type = type;
+  self->id = id;
+  self->location = location;
+  self->activity = activity;
+  self->row_type = row_type;
+  self->style = style;
+  self->weight = weight;
+
+  return self;
+}
+
 enum usdlg_cmd {
   USDLG_CMD_SELECT,
   USDLG_CMD_DESELECT,
@@ -121,10 +170,8 @@ struct unit_select_dialog {
   GtkWidget *notebook;
 
   struct {
-#ifdef OLD
-    GtkTreeStore *store;
     GtkWidget *view;
-#endif
+    GListStore *store;
     GtkWidget *page;
     GtkTreePath *path;
 
@@ -146,22 +193,26 @@ static void usdlg_refresh(struct unit_select_dialog *pdialog);
 static void usdlg_tab_select(struct unit_select_dialog *pdialog,
                              const char *title,
                              enum unit_select_location_mode loc);
+static void usdlg_setup_pixbuf(GtkListItemFactory *f, GObject *obj);
+static void usdlg_bind_pixbuf(GtkListItemFactory *f, GObject *obj);
+static void usdlg_setup_text(GtkListItemFactory *f, GObject *obj);
+static void usdlg_bind_text(GtkListItemFactory *f, GObject *obj);
+static void usdlg_setup_int(GtkListItemFactory *f, GObject *obj);
+static void usdlg_bind_int(GtkListItemFactory *f, GObject *obj);
+#ifdef OLD
 static GtkTreeStore *usdlg_tab_store_new(void);
+#endif
 static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
                              struct usdata_hash *ushash,
                              enum unit_select_location_mode loc);
-#ifdef OLD
-static void usdlg_tab_append_utype(GtkTreeStore *store,
+static void usdlg_tab_append_utype(GListStore *store,
                                    enum unit_select_location_mode loc,
-                                   const struct unit_type *putype,
-                                   GtkTreeIter *it);
-static void usdlg_tab_append_activity(GtkTreeStore *store,
+                                   const struct unit_type *putype);
+static void usdlg_tab_append_activity(GListStore *store,
                                       enum unit_select_location_mode loc,
                                       const struct unit_type *putype,
                                       enum unit_activity act,
-                                      int count, GtkTreeIter *it,
-                                      GtkTreeIter *parent);
-#endif
+                                      int count);
 static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
                                    enum unit_select_location_mode loc,
                                    enum unit_activity act,
@@ -387,7 +438,8 @@ static void usdlg_tab_select(struct unit_select_dialog *pdialog,
                              const char *title,
                              enum unit_select_location_mode loc)
 {
-  GtkWidget *page, *label, *hgrid, *vgrid, *sw;
+  GtkWidget *page, *label, *hgrid, *vgrid, *view, *sw;
+  GListStore *store;
 #ifdef OLD
   GtkWidget *view;
   GtkTreeStore *store;
@@ -428,53 +480,45 @@ static void usdlg_tab_select(struct unit_select_dialog *pdialog,
   g_signal_connect(view, "cursor-changed",
                    G_CALLBACK(usdlg_cmd_cursor_changed), GINT_TO_POINTER(loc));
 #endif
+  view = gtk_column_view_new(NULL);
+  pdialog->tabs[loc].view = view;
 
   /* Translate titles. */
   intl_slist(ARRAY_SIZE(usdlg_col_titles), usdlg_col_titles, &titles_done);
 
-#ifdef OLD
   for (i = 0; i < USDLG_COLUMNS_SHOW; i++) {
-    GtkTreeViewColumn *column = NULL;
-    GtkCellRenderer *renderer = NULL;
-
+    GtkColumnViewColumn *column;
+    GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
     switch (usdlg_col_types[i]) {
     case COL_PIXBUF:
-      renderer = gtk_cell_renderer_pixbuf_new();
-      column = gtk_tree_view_column_new_with_attributes(
-                 usdlg_col_titles[i], renderer, "pixbuf", i, NULL);
-      gtk_tree_view_column_set_expand(column, FALSE);
+      g_signal_connect(factory, "setup", G_CALLBACK(usdlg_setup_pixbuf), NULL);
+      g_signal_connect(factory, "bind", G_CALLBACK(usdlg_bind_pixbuf), NULL);
       break;
     case COL_TEXT:
-      renderer = gtk_cell_renderer_text_new();
-      column = gtk_tree_view_column_new_with_attributes(
-                 usdlg_col_titles[i], renderer, "text", i,
-                 "style", USDLG_COL_STYLE, "weight", USDLG_COL_WEIGHT, NULL);
-      gtk_tree_view_column_set_expand(column, TRUE);
+      g_signal_connect(factory, "setup", G_CALLBACK(usdlg_setup_text), NULL);
+      g_signal_connect(factory, "bind", G_CALLBACK(usdlg_bind_text), NULL);
       break;
     case COL_INT:
-      renderer = gtk_cell_renderer_text_new();
-      column = gtk_tree_view_column_new_with_attributes(
-                 usdlg_col_titles[i], renderer, "text", i,
-                 "style", USDLG_COL_STYLE, "weight", USDLG_COL_WEIGHT, NULL);
-      g_object_set(renderer, "xalign", 1.0, NULL);
-      gtk_tree_view_column_set_alignment(column, 1.0);
-      gtk_tree_view_column_set_expand(column, FALSE);
+      g_signal_connect(factory, "setup", G_CALLBACK(usdlg_setup_int), NULL);
+      g_signal_connect(factory, "bind", G_CALLBACK(usdlg_bind_int), NULL);
       break;
     }
-
-    fc_assert_ret(column != NULL);
-    gtk_tree_view_append_column(GTK_TREE_VIEW(view), column);
+    column = gtk_column_view_column_new(usdlg_col_titles[i],
+                                        GTK_LIST_ITEM_FACTORY(factory));
+    gtk_column_view_append_column(GTK_COLUMN_VIEW(view), column);
   }
-#endif
+  store = g_list_store_new(usdlg_item_get_type());
+  pdialog->tabs[loc].store = store;
+  gtk_column_view_set_model(
+      GTK_COLUMN_VIEW(view),
+      GTK_SELECTION_MODEL(gtk_single_selection_new(G_LIST_MODEL(store))));
 
   sw = gtk_scrolled_window_new();
   gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(sw), 300);
   gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(sw), TRUE);
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw),
                                  GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-#ifdef OLD
   gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), view);
-#endif
   gtk_grid_attach(GTK_GRID(hgrid), sw, grid_col++, 0, 1, 1);
 
   vgrid = gtk_grid_new();
@@ -553,6 +597,51 @@ static void usdlg_tab_select(struct unit_select_dialog *pdialog,
     GTK_WIDGET(pdialog->tabs[loc].cmd[USDLG_CMD_FOCUS]), FALSE);
 }
 
+static void usdlg_setup_pixbuf(GtkListItemFactory *f, GObject *obj)
+{
+  GtkWidget *img = gtk_image_new();
+  gtk_list_item_set_child(GTK_LIST_ITEM(obj), img);
+}
+
+static void usdlg_bind_pixbuf(GtkListItemFactory *f, GObject *obj)
+{
+  usdlg_item_t *item;
+  g_object_get(GTK_LIST_ITEM(obj), "item", &item, NULL);
+  gtk_image_set_from_pixbuf(GTK_IMAGE(gtk_list_item_get_child(GTK_LIST_ITEM(obj))),
+                            item->unit);
+}
+
+static void usdlg_setup_text(GtkListItemFactory *f, GObject *obj)
+{
+  GtkWidget *lab = gtk_label_new(NULL);
+  gtk_list_item_set_child(GTK_LIST_ITEM(obj), lab);
+}
+
+static void usdlg_bind_text(GtkListItemFactory *f, GObject *obj)
+{
+  usdlg_item_t *item;
+  g_object_get(GTK_LIST_ITEM(obj), "item", &item, NULL);
+  gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(GTK_LIST_ITEM(obj))),
+                     item->description);
+}
+
+static void usdlg_setup_int(GtkListItemFactory *f, GObject *obj)
+{
+  GtkWidget *lab = gtk_label_new(NULL);
+  gtk_list_item_set_child(GTK_LIST_ITEM(obj), lab);
+}
+
+static void usdlg_bind_int(GtkListItemFactory *f, GObject *obj)
+{
+  usdlg_item_t *item;
+  g_object_get(GTK_LIST_ITEM(obj), "item", &item, NULL);
+  char buf[32];
+#warning FIXME: Somehow replace the count with the right variable
+  g_snprintf(buf, sizeof buf, "%d", item->count);
+  gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(GTK_LIST_ITEM(obj))),
+                     buf);
+}
+
 #ifdef OLD
 /*************************************************************************//**
   Create a player dialog store.
@@ -591,16 +680,14 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
                              enum unit_select_location_mode loc)
 {
   bool show = FALSE;
-#ifdef OLD
-  GtkTreeStore *store;
-#endif
+  GListStore *store;
 
   fc_assert_ret_val(ushash, FALSE);
   fc_assert_ret_val(pdialog != NULL, FALSE);
 
-#ifdef OLD
   store = pdialog->tabs[loc].store;
 
+#ifdef OLD
   /* clear current store. */
   gtk_tree_store_clear(GTK_TREE_STORE(store));
 #endif
@@ -656,19 +743,13 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
 
         /* Level 1: Display unit type. */
         if (first) {
-#ifdef OLD
-          usdlg_tab_append_utype(GTK_TREE_STORE(store), loc, data->utype,
-                                 &it_utype);
-#endif
+          usdlg_tab_append_utype(store, loc, data->utype);
           first = FALSE;
         }
 
         /* Level 2: Display unit activities. */
-#ifdef OLD
-        usdlg_tab_append_activity(GTK_TREE_STORE(store), loc, data->utype,
-                                  act, unit_list_size(data->units[loc][act]),
-                                  &it_act, &it_utype);
-#endif
+        usdlg_tab_append_activity(store, loc, data->utype,
+                                  act, unit_list_size(data->units[loc][act]));
 
         /* Level 3: Display all units with this activity
          *          (and transported units in further level(s)). */
@@ -703,23 +784,18 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
   return show;
 }
 
-#ifdef OLD
 /*************************************************************************//**
   Append the data for one unit type.
 *****************************************************************************/
-static void usdlg_tab_append_utype(GtkTreeStore *store,
+static void usdlg_tab_append_utype(GListStore *store,
                                    enum unit_select_location_mode loc,
-                                   const struct unit_type *putype,
-                                   GtkTreeIter *it)
+                                   const struct unit_type *putype)
 {
   GdkPixbuf *pix;
   char buf[128];
 
   fc_assert_ret(store != NULL);
   fc_assert_ret(putype != NULL);
-
-  /* Add this item. */
-  gtk_tree_store_append(GTK_TREE_STORE(store), it, NULL);
 
   /* Create a icon */
   {
@@ -737,58 +813,46 @@ static void usdlg_tab_append_utype(GtkTreeStore *store,
   /* The name of the unit. */
   fc_snprintf(buf, sizeof(buf), "%s", utype_name_translation(putype));
 
+#ifdef FIXME
   /* Add it to the tree. */
-  gtk_tree_store_set(GTK_TREE_STORE(store), it,
-                     0, pix,                            /* Unit pixmap */
-                     1, buf,                            /* Text */
-                     2, -1, /* will be set later */     /* Number of units */
-                     3, utype_index(putype),            /* Unit type ID */
-                     /* 4: not set */                   /* Unit ID */
-                     5, loc,                            /* Unit location */
-                     /* 6: not set */                   /* Unit activity */
-                     7, ROW_UNITTYPE,                   /* Row type */
-                     8, PANGO_STYLE_NORMAL,             /* Style */
-                     9, PANGO_WEIGHT_BOLD,              /* Weight */
-                     -1);
+  g_list_store_append(store,
+                      usdlg_item_new(pix, buf, -1, utype_index(putype), -1, loc,
+                                     -1, ROW_UNITTYPE, PANGO_STYLE_NORMAL,
+                                     PANGO_WEIGHT_BOLD));
+#endif
   g_object_unref(pix);
 }
 
 /*************************************************************************//**
   Append the unit activity.
 *****************************************************************************/
-static void usdlg_tab_append_activity(GtkTreeStore *store,
+static void usdlg_tab_append_activity(GListStore *store,
                                       enum unit_select_location_mode loc,
                                       const struct unit_type *putype,
                                       enum unit_activity act,
-                                      int count, GtkTreeIter *it,
-                                      GtkTreeIter *parent)
+                                      int count)
 {
   char buf[128] = "";
 
   fc_assert_ret(store != NULL);
   fc_assert_ret(putype != NULL);
 
+#ifdef OLD
   /* Add this item. */
   gtk_tree_store_append(GTK_TREE_STORE(store), it, parent);
+#endif
 
   /* The activity. */
   fc_snprintf(buf, sizeof(buf), "%s", get_activity_text(act));
 
+#ifdef FIXME
   /* Add it to the tree. */
-  gtk_tree_store_set(GTK_TREE_STORE(store), it,
-                     /* 0: not set */                   /* Unit pixmap */
-                     1, buf,                            /* Text */
-                     2, count,                          /* Number of units */
-                     3, utype_index(putype),            /* Unit type ID */
-                     /* 4: not set */                   /* Unit ID */
-                     5, loc,                            /* Unit location */
-                     6, act,                            /* Unit activity */
-                     7, ROW_ACTIVITY,                   /* Row type */
-                     8, PANGO_STYLE_NORMAL,             /* Style */
-                     9, PANGO_WEIGHT_NORMAL,            /* Weight */
-                     -1);
-}
+  g_list_store_append(store,
+                      usdlg_item_new(NULL, buf, count, utype_index(putype), -1,
+                                     loc, act, ROW_ACTIVITY, PANGO_STYLE_NORMAL,
+                                     PANGO_WEIGHT_NORMAL));
 #endif
+}
 
 /*************************************************************************//**
   Get an unit selection list item suitable image of the specified unit.
@@ -870,17 +934,14 @@ static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
   enum usdlg_row_types row = ROW_UNIT;
   int style = PANGO_STYLE_NORMAL;
   int weight = PANGO_WEIGHT_NORMAL;
-#ifdef OLD
-  GtkTreeStore *store;
-#endif
+  GListStore *store;
 
   fc_assert_ret(pdialog != NULL);
   fc_assert_ret(punit != NULL);
 
-#ifdef OLD
   store = pdialog->tabs[loc].store;
 
-
+#ifdef OLD
   /* Add this item. */
   gtk_tree_store_append(GTK_TREE_STORE(store), it, parent);
 #endif
@@ -896,22 +957,9 @@ static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
     row = ROW_UNIT_TRANSPORTED;
   }
 
-#ifdef OLD
-  /* Add it to the tree. */
-  gtk_tree_store_set(GTK_TREE_STORE(store), it,
-                     0, pix,                            /* Unit pixmap */
-                     1, text,                           /* Text */
-                     2, 1,                              /* Number of units */
-                     3, utype_index(unit_type_get(punit)), /* Unit type ID */
-                     4, punit->id,                      /* Unit ID */
-                     5, loc,                            /* Unit location */
-                     6, act,                            /* Unit activity */
-                     7, row,                            /* Row type */
-                     8, style,                          /* Style */
-                     9, weight,                         /* Weight */
-                     -1);
-  g_object_unref(pix);
-#endif
+  g_list_store_append(
+      store, usdlg_item_new(pix, text, 1, utype_index(unit_type_get(punit)),
+                            punit->id, loc, act, row, style, weight));
 
   if (get_transporter_occupancy(punit) > 0) {
     unit_list_iterate(unit_transport_cargo(punit), pcargo) {
