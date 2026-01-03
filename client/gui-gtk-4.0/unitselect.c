@@ -15,6 +15,7 @@
 #include <fc_config.h>
 #endif
 
+#include <gdk/gdk.h>
 #include <gtk/gtk.h>
 
 /* utility */
@@ -106,7 +107,7 @@ static const char *usdlg_col_titles[USDLG_COLUMNS_ALL] = {
 
 typedef struct{
   GObject parent;
-  GdkPixbuf *unit;
+  cairo_surface_t *unit;
   char *description;
   int count;
   int type;
@@ -126,14 +127,14 @@ G_DEFINE_TYPE(usdlg_item_t, usdlg_item, G_TYPE_OBJECT)
 static void usdlg_item_finalize(GObject *o)
 {
   usdlg_item_t *self = (usdlg_item_t *)o;
-  g_clear_object(&self->unit);
+  cairo_surface_destroy(self->unit);
   g_clear_pointer(&self->description, g_free);
   G_OBJECT_CLASS(usdlg_item_parent_class)->finalize(o);
 }
 static void usdlg_item_class_init(usdlg_item_tClass *k) { G_OBJECT_CLASS(k)->finalize = usdlg_item_finalize; }
 static void usdlg_item_init(usdlg_item_t *i) {}
 
-static usdlg_item_t *usdlg_item_new(GdkPixbuf *unit, const char *description,
+static usdlg_item_t *usdlg_item_new(cairo_surface_t *unit, const char *description,
                                     int count, int type, int id, int location,
                                     int activity, int row_type, int style,
                                     int weight) {
@@ -213,6 +214,7 @@ static void usdlg_tab_append_activity(GListStore *store,
                                       const struct unit_type *putype,
                                       enum unit_activity act,
                                       int count);
+static cairo_surface_t *usdlg_get_unit_surface(const struct unit *punit);
 static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
                                    enum unit_select_location_mode loc,
                                    enum unit_activity act,
@@ -600,15 +602,27 @@ static void usdlg_tab_select(struct unit_select_dialog *pdialog,
 static void usdlg_setup_pixbuf(GtkListItemFactory *f, GObject *obj)
 {
   GtkWidget *img = gtk_image_new();
+  gtk_widget_set_size_request(img, tileset_full_tile_width(tileset),
+                              tileset_full_tile_height(tileset));
   gtk_list_item_set_child(GTK_LIST_ITEM(obj), img);
 }
 
 static void usdlg_bind_pixbuf(GtkListItemFactory *f, GObject *obj)
 {
   usdlg_item_t *item;
+  GtkWidget *img = gtk_list_item_get_child(GTK_LIST_ITEM(obj));
   g_object_get(GTK_LIST_ITEM(obj), "item", &item, NULL);
-  gtk_image_set_from_pixbuf(GTK_IMAGE(gtk_list_item_get_child(GTK_LIST_ITEM(obj))),
-                            item->unit);
+
+  int w = cairo_image_surface_get_width(item->unit);
+  int h = cairo_image_surface_get_width(item->unit);
+  int stride = cairo_image_surface_get_stride(item->unit);
+  guchar *data = cairo_image_surface_get_data(item->unit);
+  GBytes *bytes = g_bytes_new(data, h * stride);
+
+  GdkTexture *tex =
+      gdk_memory_texture_new(w, h, GDK_MEMORY_A8R8G8B8, bytes, stride);
+  gtk_image_set_from_paintable(GTK_IMAGE(img), GDK_PAINTABLE(tex));
+  g_object_unref(tex);
 }
 
 static void usdlg_setup_text(GtkListItemFactory *f, GObject *obj)
@@ -876,6 +890,18 @@ GdkPixbuf *usdlg_get_unit_image(const struct unit *punit)
   return out;
 }
 
+static cairo_surface_t *usdlg_get_unit_surface(const struct unit *punit)
+{
+  struct canvas canvas_store = FC_STATIC_CANVAS_INIT;
+
+  canvas_store.surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+      tileset_full_tile_width(tileset), tileset_full_tile_height(tileset));
+
+  put_unit(punit, &canvas_store, 1.0, 0, 0);
+
+  return canvas_store.surface;
+}
+
 /*************************************************************************//**
   Get an unit selection list item suitable description of the specified
   unit.
@@ -930,7 +956,7 @@ static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
                                    GtkTreeIter *parent)
 {
   const char *text;
-  GdkPixbuf *pix;
+  cairo_surface_t *pix;
   enum usdlg_row_types row = ROW_UNIT;
   int style = PANGO_STYLE_NORMAL;
   int weight = PANGO_WEIGHT_NORMAL;
@@ -947,7 +973,7 @@ static void usdlg_tab_append_units(struct unit_select_dialog *pdialog,
 #endif
 
   /* Unit gfx */
-  pix = usdlg_get_unit_image(punit);
+  pix = usdlg_get_unit_surface(punit);
 
   text = usdlg_get_unit_descr(punit);
 
